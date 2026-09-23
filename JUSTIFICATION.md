@@ -1,151 +1,51 @@
-# Justification — Refactor the Spaghetti Screen
+Justification — Refactor the Spaghetti Screen
 
-Each paragraph below names the level a widget was placed at and the specific rule
-from the activity sheet that puts it there.
+One paragraph per extracted widget: the level it was placed at, and the rule that puts it there.
 
-## Supporting layer (not a UI level)
+Atoms
 
-**`Product` (lib/models/product.dart).** This isn't an Atomic Design level — it's
-the data model the rules keep referencing ("Templates ... must never import a data
-model directly", "Pages are the only place allowed to hold the actual product
-list"). Pulling the product `Map<String, dynamic>` out into a typed `Product` class
-made those two rules checkable: I could grep for `import '.../product.dart'`
-across `templates/` and confirm it never appears there, and confirm the only place
-that holds a `List<Product>` is `CatalogPage`.
+AppHeading. Atom. Rule: "Atoms hold no logic and no state beyond what's needed to render (StatelessWidget only)." It's a StatelessWidget that renders only the text string it's given, nothing else.
 
-## Atoms
+AppPrimaryButton. Atom. Same rule — no internal state, no decision-making about what pressing it does. Label, styling, and the onPressed callback are all supplied from outside.
 
-**`AppHeading`.** Renders one string in a fixed bold style. It has no state
-beyond the text it displays and no logic — a pure `StatelessWidget` — so it meets
-the atom rule exactly and is reused for all three section headings ("Search
-Products", "Catalog", "Add New Product") instead of three copies of the same
-`Text` + `TextStyle`.
+ProductIconAvatar. Atom. Same rule — renders the IconData it's given and nothing more; no knowledge of what a product is.
 
-**`AppPrimaryButton`.** The indigo/white button styling appeared twice
-(`Add to Cart`, `Submit Product`) with only the label, padding, text style and
-full-width behavior differing. It takes all of that as parameters and makes no
-decision about *what* pressing it does — that's the caller's `onPressed`. No
-internal state, no business logic → atom.
+DeleteIconButton. Atom. Same rule — forwards a press via onPressed but does not itself delete anything; deleting is decided by whoever owns the data.
 
-**`ProductIconAvatar`.** A 56×56 decorated box around an `Icon`. It only reads the
-`IconData` it's given; it doesn't know what a product is or where the icon came
-from. Stateless, logic-free rendering → atom.
+ProductNameLabel, CategoryLabel, PriceLabel. Atoms. Same rule — each is a StatelessWidget with a fixed style and no state, rendering one piece of text.
 
-**`DeleteIconButton`.** Wraps a single `IconButton` with fixed red delete styling
-and forwards presses via `onPressed`. It doesn't remove anything itself — the atom
-rule says atoms hold no logic beyond rendering, so the actual removal stays in the
-Page, which owns the list.
+SearchTextField. Atom. Same rule — no internal state; every keystroke is forwarded via onChanged.
 
-**`ProductNameLabel`, `CategoryLabel`, `PriceLabel`.** Three single-purpose text
-atoms, one per distinct piece of text on a card (name, category, formatted
-price). Each is a one-line `StatelessWidget` with a fixed `TextStyle` and no
-state — splitting them individually (rather than one "ProductText" atom) keeps
-each one meaningfully reusable on its own, e.g. `PriceLabel` could show up
-anywhere a price needs the same indigo/bold treatment.
+LabeledTextFormField. Atom. Same rule — validator, controller, and keyboard type are all passed in as parameters, so the atom itself makes no decisions about what counts as valid input.
 
-**`SearchTextField`.** A bare `TextField` that forwards `onChanged` and owns no
-`TextEditingController` or internal state. Because it's uncontrolled, it also
-faithfully reproduces the original's quirk of not visually clearing when
-`_searchQuery` is reset after a product is added — matching the "must behave
-identically" requirement instead of "fixing" a bug that wasn't asked for.
+CategoryDropdownField. Atom. Same rule — value, options, and the change callback are all supplied from outside; it does not decide what a category change means.
 
-**`LabeledTextFormField`.** One generic `TextFormField` wrapper reused for the
-Name, Price, and Description inputs. It accepts `validator`, `keyboardType`,
-`maxLines`, and `controller` as parameters rather than deciding validation rules
-itself — the atom renders and reports `onChanged`/validation results, but the
-actual rules (e.g. "price must be > 0") are supplied from the organism that owns
-them. This is what let three near-identical `TextFormField` blocks in the
-original collapse into one reusable atom.
+CatalogAppBar. Atom. Same rule — title and color are fixed and never change based on state.
 
-**`CategoryDropdownField`.** Same reasoning as above: a `DropdownButtonFormField`
-that receives `value`, `categories`, and `onChanged` and holds no state of its
-own — the organism above it decides what "changing category" means.
+Molecules
 
-**`CatalogAppBar`.** The `AppBar`'s title and color never change based on app
-state, so despite technically being a "complex" Material widget, its actual
-responsibility here is 100% static rendering — no logic, no data — which is
-squarely inside the atom rule rather than the organism rule (organisms combine
-*multiple* atoms/molecules into a section; this is a single fixed widget).
+CatalogSearchBar. Molecule. Rule: molecules are "small groups of atoms functioning as a single unit." It combines AppHeading + SearchTextField into the one unit the user sees as "the search box."
 
-## Molecules
+ProductInfo. Molecule. Same rule — combines ProductNameLabel, CategoryLabel, and PriceLabel into the single info block shown on a card.
 
-**`CatalogSearchBar`.** Groups `AppHeading` + `SearchTextField` into the single
-functional unit a user thinks of as "the search box." It doesn't hold local state
-itself, but the molecule rule doesn't require that — it only permits it. What
-makes it a molecule rather than an atom is that it *composes two atoms* into one
-reusable unit, matching the definition ("small groups of atoms functioning as a
-single unit").
+ProductActions. Molecule. Same rule — combines AppPrimaryButton and DeleteIconButton into the single actions block on a card. Rule also satisfied: "Molecules may hold local UI state ... but never business logic" — it holds none, it only forwards two callbacks.
 
-**`ProductInfo`.** Groups `ProductNameLabel`, `CategoryLabel`, and `PriceLabel`
-into the info column shown on every card. Same rule as above: it's a small,
-fixed composition of atoms with no business logic of its own — it just lays out
-whatever `Product` it's handed.
+Organisms
 
-**`ProductActions`.** Groups `AppPrimaryButton` ("Add to Cart") and
-`DeleteIconButton` into the action column on the right of a card. It holds no
-state and no business logic (it doesn't decide what "add to cart" or "delete"
-actually do) — it only composes two atoms and forwards two callbacks, which is
-exactly the molecule boundary.
+ProductCard. Organism. Rule: organisms are the "complex section[s]" built from molecules and atoms — this combines ProductIconAvatar, ProductInfo, and ProductActions into one full card, and does not own the product list.
 
-## Organisms
+ProductCatalogList. Organism. Rule: "Organisms may contain local logic but should not directly own the app's core data." It filters the list it's given by search query, which is local logic, but never stores or mutates that list itself.
 
-**`ProductCard`.** A full catalog row — icon avatar + product info + actions —
-is a "complex section composed of molecules and atoms," which is the organism
-rule verbatim. It receives one `Product` and two callbacks and has no
-data-fetching or catalog ownership of its own, so it doesn't cross into Page
-territory.
+AddProductForm. Organism. Same rule. The GlobalKey<FormState>, text controllers, and selected category are local UI state belonging to the form, not the app's core data, so an organism is allowed to hold them. Validation logic lives here too. It does not construct a Product, assign an id, touch _products, or show the confirmation SnackBar — it only reports raw field values upward via onSubmit, keeping the "clear Organism/Page boundary" the rubric asks for.
 
-**`ProductCatalogList`.** Owns the search-filtering *computation*
-(`products.where(...)`) but not the *data* — the `List<Product>` it filters is
-handed in every build, and it's never mutated here. This matches "Organisms may
-contain local logic but should not directly own the app's core data": filtering
-is local logic derived from data it was given, not ownership of that data.
+Template
 
-**`AddProductForm`.** This is the one place the rules get subtle, so it gets the
-longest justification. The form needs a `GlobalKey<FormState>`, three
-`TextEditingController`s, and the currently-selected category to function at
-all — none of that is "the app's core data" (the product catalog), it's local UI
-state that belongs to the form widget itself, so keeping it here doesn't violate
-the organism rule. Validation (`_validateName`, `_validatePrice`) also lives
-here, next to the fields it validates, rather than in the Page. What the
-organism does *not* do is decide what a successful submission means: it doesn't
-construct a `Product`, doesn't assign an `id`, doesn't touch `_products`, and
-doesn't show the confirmation `SnackBar`. It only calls `onSubmit(name, price,
-category, description)` — raw field values — and then clears its own fields.
-That's the "clear Organism/Page boundary" the rubric asks for: the organism owns
-the *form*, the Page owns the *data and the confirmation feedback that follows a
-successful data change*.
+CatalogPageTemplate. Template. Rule: "Templates accept layout slots as parameters and must never import a data model directly." It takes appBar, searchSection, catalogSection, and formSection as plain Widget slots and never imports Product.
 
-## Template
+Page
 
-**`CatalogPageTemplate`.** Accepts `appBar`, `searchSection`, `catalogSection`,
-and `formSection` purely as `Widget`/`PreferredSizeWidget` slots and arranges
-them in the `Scaffold` + `SingleChildScrollView` + `Column` structure. It never
-imports `Product` and never sees a product, a search query, or a form value — it
-only knows how to lay out three boxes and a divider, which is exactly what the
-template rule asks for ("accept layout slots as parameters and must never import
-a data model directly").
+CatalogPage. Page. Rule: "Pages are the only place allowed to hold the actual product list and wire real data downward." It's the only file that declares List<Product> _products, the only place that assigns a new product's id, mutates the list, and shows both SnackBars.
 
-## Page
+Note on something I was unsure how to classify
 
-**`CatalogPage`.** The only file that declares `List<Product> _products`. It
-owns `_searchQuery` and `_nextId`, and it's the only place that: (1) turns raw
-form values into an actual `Product` (assigning the id and the default
-`Icons.inventory_2`), (2) mutates `_products` via `setState`, and (3) shows both
-`SnackBar`s (add-to-cart and add-to-catalog confirmation). Every one of those is
-either "own the actual product list" or "wire real data downward" — the two
-things the rules say only a Page may do.
-
-## Note on something I was unsure how to classify
-
-The submit flow's confirmation `SnackBar` was the one genuinely ambiguous piece.
-It's arguably *part of the form's job* (the user just interacted with the form,
-so the form "knows" a submission happened) — I could see an argument for having
-`AddProductForm` show it directly. I placed it in `CatalogPage` instead, because
-showing a green "added to catalog" message only makes sense *after* the product
-has actually been added to `_products`, and only the Page can know that
-succeeded (the organism doesn't touch the list at all). If a future requirement
-ever needed the form to show feedback *before* a Page-level save finishes (e.g.
-optimistic UI), I'd expect that confirmation logic to move into a callback result
-rather than staying implicit — but for this activity's behavior, tying it to the
-actual data mutation felt like the more defensible boundary.
+The confirmation SnackBar after a successful submit could arguably belong to the form, since it just handled the interaction, or the page, since it owns the data being confirmed. I placed it in the Page, since the message only makes sense once the product has actually been added, and only the Page knows that succeeded.
